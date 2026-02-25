@@ -52,6 +52,7 @@ export interface Config {
   rules?: Rules;
   authentication?: Authentication;
   pipeline?: PipelineConfig;
+  url_harvest?: UrlHarvestConfig;
 }
 
 export type RetryPreset = 'default' | 'subscription';
@@ -59,6 +60,40 @@ export type RetryPreset = 'default' | 'subscription';
 export interface PipelineConfig {
   retry_preset?: RetryPreset;
   max_concurrent_pipelines?: number;
+}
+
+export type UrlHarvestScopePolicy = 'same-origin' | 'first-party' | 'broad-discovery';
+
+export interface UrlHarvestBasicAuth {
+  username: string;
+  password: string;
+}
+
+export interface UrlHarvestAuthConfig {
+  headers?: Record<string, string>;
+  cookies?: Record<string, string>;
+  bearer_token?: string;
+  basic_auth?: UrlHarvestBasicAuth;
+}
+
+/**
+ * URL-first workspace preparation controls.
+ *
+ * Note: values may arrive as strings from YAML parsing and are coerced by
+ * the URL harvester service.
+ */
+export interface UrlHarvestConfig {
+  max_pages?: number | string;
+  max_depth?: number | string;
+  max_assets?: number | string;
+  max_discovered_domains?: number | string;
+  max_endpoint_probes?: number | string;
+  http_concurrency?: number | string;
+  probe_concurrency?: number | string;
+  harvest_timeout_minutes?: number | string;
+  auto_clone_public_repos?: boolean | string;
+  scope_policy?: UrlHarvestScopePolicy | string;
+  auth?: UrlHarvestAuthConfig;
 }
 
 export interface DistributedConfig {

@@ -4,9 +4,19 @@ export type { AgentMetrics } from '../types/metrics.js';
 import type { AgentMetrics } from '../types/metrics.js';
 import type { PipelineConfig } from '../types/config.js';
 
+export type AnalysisMode = 'url-first';
+export type DiscoveryProfile = 'aggressive-broad';
+
 export interface PipelineInput {
   webUrl: string;
-  repoPath: string;
+  /**
+   * Deprecated alias from white-box mode. Kept for backward compatibility.
+   * In URL-first mode this is optional and ignored as the primary source path.
+   */
+  repoPath?: string;
+  analysisMode: AnalysisMode;
+  manualSource?: string;
+  discoveryProfile?: DiscoveryProfile;
   configPath?: string;
   outputPath?: string;
   pipelineTestingMode?: boolean;

@@ -1,0 +1,35 @@
+services:
+  studio:
+    restart: unless-stopped
+    environment:
+      - STUDIO_COOKIE_SECURE=true
+    expose:
+      - "3000"
+    ports: []
+
+  temporal:
+    restart: unless-stopped
+
+  worker:
+    restart: unless-stopped
+
+  router:
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.9
+    restart: unless-stopped
+    depends_on:
+      studio:
+        condition: service_started
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  caddy-data:
+  caddy-config:

@@ -1,0 +1,15 @@
+Mode: {{ANALYSIS_MODE}}
+Target URL: {{WEB_URL}}
+Workspace Path: {{REPO_PATH}}
+Source Inventory: {{SOURCE_INVENTORY_PATH}}
+Harvest Summary: {{HARVEST_SUMMARY}}
+
+Perform injection vulnerability analysis (SQLi, command injection, path traversal, SSTI, deserialization)
+using URL-first evidence. Only include externally exploitable findings.
+
+1. Write `deliverables/injection_analysis_deliverable.md`.
+2. Save with `save_deliverable` type `INJECTION_ANALYSIS` and `file_path`.
+3. Save queue with `save_deliverable` type `INJECTION_QUEUE` and
+   `content: {"vulnerabilities":[...]}` (empty list if none).
+
+Output: INJECTION ANALYSIS COMPLETE

@@ -12,7 +12,7 @@
  * time and API costs compared to failing mid-pipeline.
  *
  * Checks run sequentially, cheapest first:
- * 1. Repository path exists and contains .git
+ * 1. Analysis path exists and is writable
  * 2. Config file parses and validates (if provided)
  * 3. Credentials validate via Claude Agent SDK query (API key, OAuth, or router mode)
  */
@@ -26,24 +26,24 @@ import { type Result, ok, err } from '../types/result.js';
 import { parseConfig } from '../config-parser.js';
 import type { ActivityLogger } from '../types/activity-logger.js';
 
-// === Repository Validation ===
+// === Analysis Path Validation ===
 
-async function validateRepo(
-  repoPath: string,
+async function validateAnalysisPath(
+  analysisPath: string,
   logger: ActivityLogger
 ): Promise<Result<void, PentestError>> {
-  logger.info('Checking repository path...', { repoPath });
+  logger.info('Checking analysis path...', { analysisPath });
 
-  // 1. Check repo directory exists
+  // 1. Check directory exists
   try {
-    const stats = await fs.stat(repoPath);
+    const stats = await fs.stat(analysisPath);
     if (!stats.isDirectory()) {
       return err(
         new PentestError(
-          `Repository path is not a directory: ${repoPath}`,
+          `Analysis path is not a directory: ${analysisPath}`,
           'config',
           false,
-          { repoPath },
+          { analysisPath },
           ErrorCode.REPO_NOT_FOUND
         )
       );
@@ -51,42 +51,33 @@ async function validateRepo(
   } catch {
     return err(
       new PentestError(
-        `Repository path does not exist: ${repoPath}`,
+        `Analysis path does not exist: ${analysisPath}`,
         'config',
         false,
-        { repoPath },
+        { analysisPath },
         ErrorCode.REPO_NOT_FOUND
       )
     );
   }
 
-  // 2. Check .git directory exists
+  // 2. Check write access
   try {
-    const gitStats = await fs.stat(`${repoPath}/.git`);
-    if (!gitStats.isDirectory()) {
-      return err(
-        new PentestError(
-          `Not a git repository (no .git directory): ${repoPath}`,
-          'config',
-          false,
-          { repoPath },
-          ErrorCode.REPO_NOT_FOUND
-        )
-      );
-    }
+    const testFile = `${analysisPath}/.shannon-preflight-write-test`;
+    await fs.writeFile(testFile, 'ok', 'utf8');
+    await fs.unlink(testFile);
   } catch {
     return err(
       new PentestError(
-        `Not a git repository (no .git directory): ${repoPath}`,
+        `Analysis path is not writable: ${analysisPath}`,
         'config',
         false,
-        { repoPath },
+        { analysisPath },
         ErrorCode.REPO_NOT_FOUND
       )
     );
   }
 
-  logger.info('Repository path OK');
+  logger.info('Analysis path OK');
   return ok(undefined);
 }
 
@@ -217,21 +208,21 @@ async function validateCredentials(
 /**
  * Run all preflight checks sequentially (cheapest first).
  *
- * 1. Repository path exists and contains .git
+ * 1. Analysis path exists and is writable
  * 2. Config file parses and validates (if configPath provided)
  * 3. Credentials validate (API key, OAuth, or router mode)
  *
  * Returns on first failure.
  */
 export async function runPreflightChecks(
-  repoPath: string,
+  analysisPath: string,
   configPath: string | undefined,
   logger: ActivityLogger
 ): Promise<Result<void, PentestError>> {
-  // 1. Repository check (free — filesystem only)
-  const repoResult = await validateRepo(repoPath, logger);
-  if (!repoResult.ok) {
-    return repoResult;
+  // 1. Analysis path check (free - filesystem only)
+  const pathResult = await validateAnalysisPath(analysisPath, logger);
+  if (!pathResult.ok) {
+    return pathResult;
   }
 
   // 2. Config check (free — filesystem + CPU)

@@ -60,6 +60,10 @@ interface SessionData {
     id: string;
     webUrl: string;
     repoPath?: string;
+    analysisMode?: 'url-first';
+    analysisPath?: string;
+    sourceOrigins?: string[];
+    resumeSupported?: boolean;
     status: 'in-progress' | 'completed' | 'failed';
     createdAt: string;
     completedAt?: string;
@@ -105,11 +109,52 @@ export class MetricsTracker {
     if (exists) {
       // Load existing data
       this.data = await readJson<SessionData>(this.sessionJsonPath);
+      const changed = this.applySessionMetadataToSession();
+      if (changed) {
+        await this.save();
+      }
     } else {
       // Create new session.json
       this.data = this.createInitialData(workflowId);
       await this.save();
     }
+  }
+
+  /**
+   * Backfill session metadata fields on existing sessions without
+   * overwriting already populated values.
+   */
+  private applySessionMetadataToSession(): boolean {
+    if (!this.data) return false;
+    let changed = false;
+    const session = this.data.session;
+
+    if (!session.analysisMode && this.sessionMetadata.analysisMode) {
+      session.analysisMode = this.sessionMetadata.analysisMode;
+      changed = true;
+    }
+    if (!session.analysisPath && this.sessionMetadata.analysisPath) {
+      session.analysisPath = this.sessionMetadata.analysisPath;
+      changed = true;
+    }
+    if (!session.repoPath && this.sessionMetadata.repoPath) {
+      session.repoPath = this.sessionMetadata.repoPath;
+      changed = true;
+    }
+    if (
+      (!session.sourceOrigins || session.sourceOrigins.length === 0) &&
+      this.sessionMetadata.sourceOrigins &&
+      this.sessionMetadata.sourceOrigins.length > 0
+    ) {
+      session.sourceOrigins = [...this.sessionMetadata.sourceOrigins];
+      changed = true;
+    }
+    if (session.resumeSupported === undefined && this.sessionMetadata.resumeSupported !== undefined) {
+      session.resumeSupported = this.sessionMetadata.resumeSupported;
+      changed = true;
+    }
+
+    return changed;
   }
 
   /**
@@ -122,6 +167,8 @@ export class MetricsTracker {
       session: {
         id: this.sessionMetadata.id,
         webUrl: this.sessionMetadata.webUrl,
+        analysisMode: this.sessionMetadata.analysisMode || 'url-first',
+        resumeSupported: this.sessionMetadata.resumeSupported ?? false,
         status: 'in-progress',
         createdAt: (this.sessionMetadata as { createdAt?: string }).createdAt || formatTimestamp(),
         resumeAttempts: [],
@@ -142,6 +189,12 @@ export class MetricsTracker {
     // Only add repoPath if it exists
     if (this.sessionMetadata.repoPath) {
       sessionData.session.repoPath = this.sessionMetadata.repoPath;
+    }
+    if (this.sessionMetadata.analysisPath) {
+      sessionData.session.analysisPath = this.sessionMetadata.analysisPath;
+    }
+    if (this.sessionMetadata.sourceOrigins) {
+      sessionData.session.sourceOrigins = this.sessionMetadata.sourceOrigins;
     }
     return sessionData;
   }

@@ -169,10 +169,15 @@ export async function pentestPipelineWorkflow(
   // Use spread to conditionally include optional properties (exactOptionalPropertyTypes)
   // sessionId is workspace name for resume, or workflowId for new runs
   const sessionId = input.sessionId || input.resumeFromWorkspace || workflowId;
+  const defaultAnalysisPath = input.repoPath || `/targets/${sessionId}`;
 
-  const activityInput: ActivityInput = {
+  let activityInput: ActivityInput = {
     webUrl: input.webUrl,
-    repoPath: input.repoPath,
+    analysisMode: input.analysisMode,
+    analysisPath: defaultAnalysisPath,
+    ...(input.repoPath !== undefined && { repoPath: input.repoPath }),
+    ...(input.manualSource !== undefined && { manualSource: input.manualSource }),
+    ...(input.discoveryProfile !== undefined && { discoveryProfile: input.discoveryProfile }),
     workflowId,
     sessionId,
     ...(input.configPath !== undefined && { configPath: input.configPath }),
@@ -184,12 +189,16 @@ export async function pentestPipelineWorkflow(
 
   let resumeState: ResumeState | null = null;
 
+  if (input.analysisMode === 'url-first' && input.resumeFromWorkspace) {
+    throw new Error('Resume is disabled for URL-first runs. Start a new workspace.');
+  }
+
   if (input.resumeFromWorkspace) {
     // 1. Load resume state (validates workspace, cross-checks deliverables)
     resumeState = await a.loadResumeState(
       input.resumeFromWorkspace,
       input.webUrl,
-      input.repoPath
+      activityInput.analysisPath
     );
 
     // 2. Restore git workspace and clean up incomplete deliverables
@@ -198,7 +207,7 @@ export async function pentestPipelineWorkflow(
     ) as AgentName[];
 
     await a.restoreGitCheckpoint(
-      input.repoPath,
+      activityInput.analysisPath,
       resumeState.checkpointHash,
       incompleteAgents
     );
@@ -363,6 +372,23 @@ export async function pentestPipelineWorkflow(
   }
 
   try {
+    // === Prepare URL-first Target Workspace ===
+    state.currentPhase = 'prepare-target';
+    state.currentAgent = 'workspace-prep';
+    await a.logPhaseTransition(activityInput, 'prepare-target', 'start');
+
+    const prep = await a.prepareUrlWorkspaceActivity(activityInput);
+    activityInput = {
+      ...activityInput,
+      analysisPath: prep.analysisPath,
+      repoPath: prep.analysisPath,
+      sourceInventoryPath: prep.sourceInventoryPath,
+      harvestSummary: prep.harvestSummary,
+      sourceOrigins: prep.sourceOrigins,
+    };
+
+    await a.logPhaseTransition(activityInput, 'prepare-target', 'complete');
+
     // === Preflight Validation ===
     // Quick sanity checks before committing to expensive agent runs.
     // NOT using runSequentialPhase — preflight doesn't produce AgentMetrics.

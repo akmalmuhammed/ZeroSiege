@@ -1,0 +1,20 @@
+Mode: {{ANALYSIS_MODE}}
+Target URL: {{WEB_URL}}
+Workspace Path: {{REPO_PATH}}
+Source Inventory: {{SOURCE_INVENTORY_PATH}}
+Harvest Summary: {{HARVEST_SUMMARY}}
+
+Build a URL-first attack surface map from harvested pages, scripts, recon outputs, and optional cloned sources.
+Focus on externally reachable interfaces, auth/session flows, input vectors, and boundary assumptions.
+Prioritize these machine-generated artifacts when present:
+- `recon/reachability-map.json`
+- `recon/security-findings.json`
+- `recon/openapi-extracted.json`
+- `recon/graphql-introspection.json`
+- `recon/auth-differential.json`
+
+Write `deliverables/recon_deliverable.md`, then call:
+- save_deliverable with `deliverable_type: "RECON"`
+- `file_path: "deliverables/recon_deliverable.md"`
+
+After successful save, output: RECONNAISSANCE COMPLETE

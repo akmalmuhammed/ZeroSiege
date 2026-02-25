@@ -1,5 +1,7 @@
 # Node.js
 node_modules/
+studio/node_modules/
+studio/.next/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

@@ -11,9 +11,9 @@
  * Starts a workflow and optionally waits for completion with progress polling.
  *
  * Usage:
- *   npm run temporal:start -- <webUrl> <repoPath> [options]
+ *   npm run temporal:start -- <webUrl> [source] [options]
  *   # or
- *   node dist/temporal/client.js <webUrl> <repoPath> [options]
+ *   node dist/temporal/client.js <webUrl> [source] [options]
  *
  * Options:
  *   --config <path>       Configuration file path
@@ -26,7 +26,7 @@
  *   TEMPORAL_ADDRESS - Temporal server address (default: localhost:7233)
  */
 
-import { Connection, Client, WorkflowNotFoundError, type WorkflowHandle } from '@temporalio/client';
+import { Connection, Client, type WorkflowHandle } from '@temporalio/client';
 import dotenv from 'dotenv';
 import { displaySplashScreen } from '../splash-screen.js';
 import { sanitizeHostname } from '../audit/utils.js';
@@ -38,7 +38,7 @@ import type { PipelineConfig } from '../types/config.js';
 import type { PipelineInput, PipelineState, PipelineProgress } from './shared.js';
 
 /**
- * Session.json structure for resume validation
+ * Session.json structure for workspace metadata display
  */
 interface SessionJson {
   session: {
@@ -58,59 +58,6 @@ dotenv.config();
 const PROGRESS_QUERY = 'getProgress';
 
 /**
- * Terminate any running workflows associated with a workspace.
- * Returns the list of terminated workflow IDs.
- */
-async function terminateExistingWorkflows(
-  client: Client,
-  workspaceName: string
-): Promise<string[]> {
-  const sessionPath = path.join('./audit-logs', workspaceName, 'session.json');
-
-  if (!(await fileExists(sessionPath))) {
-    throw new Error(
-      `Workspace not found: ${workspaceName}\n` +
-      `Expected path: ${sessionPath}`
-    );
-  }
-
-  const session = await readJson<SessionJson>(sessionPath);
-
-  // Collect all workflow IDs associated with this workspace
-  const workflowIds = [
-    session.session.originalWorkflowId || session.session.id,
-    ...(session.session.resumeAttempts?.map((r) => r.workflowId) || []),
-  ].filter((id): id is string => id != null);
-
-  const terminated: string[] = [];
-
-  for (const wfId of workflowIds) {
-    try {
-      const handle = client.workflow.getHandle(wfId);
-      const description = await handle.describe();
-
-      if (description.status.name === 'RUNNING') {
-        console.log(`Terminating running workflow: ${wfId}`);
-        await handle.terminate('Superseded by resume workflow');
-        terminated.push(wfId);
-        console.log(`Terminated: ${wfId}`);
-      } else {
-        console.log(`Workflow already ${description.status.name}: ${wfId}`);
-      }
-    } catch (error) {
-      if (error instanceof WorkflowNotFoundError) {
-        console.log(`Workflow not found (already cleaned up): ${wfId}`);
-      } else {
-        console.log(`Failed to terminate ${wfId}: ${error}`);
-        // Continue anyway - don't block resume on termination failure
-      }
-    }
-  }
-
-  return terminated;
-}
-
-/**
  * Validate workspace name: alphanumeric, hyphens, underscores, 1-128 chars,
  * must start with alphanumeric.
  */
@@ -123,21 +70,22 @@ function showUsage(): void {
   console.log('Start a pentest pipeline workflow\n');
   console.log('Usage:');
   console.log(
-    '  node dist/temporal/client.js <webUrl> <repoPath> [options]\n'
+    '  node dist/temporal/client.js <webUrl> [source] [options]\n'
   );
   console.log('Options:');
+  console.log('  --source <value>      Optional source: git URL or local repo name');
   console.log('  --config <path>       Configuration file path');
   console.log('  --output <path>       Output directory for audit logs');
   console.log('  --pipeline-testing    Use minimal prompts for fast testing');
-  console.log('  --workspace <name>    Resume from existing workspace');
+  console.log('  --workspace <name>    New named workspace');
   console.log(
     '  --workflow-id <id>    Custom workflow ID (default: shannon-<timestamp>)'
   );
   console.log('  --wait                Wait for workflow completion with progress polling\n');
   console.log('Examples:');
-  console.log('  node dist/temporal/client.js https://example.com /path/to/repo');
+  console.log('  node dist/temporal/client.js https://example.com');
   console.log(
-    '  node dist/temporal/client.js https://example.com /path/to/repo --config config.yaml\n'
+    '  node dist/temporal/client.js https://example.com my-repo --config config.yaml\n'
   );
 }
 
@@ -145,14 +93,14 @@ function showUsage(): void {
 
 interface CliArgs {
   webUrl: string;
-  repoPath: string;
+  sourceInput?: string;
   configPath?: string;
   outputPath?: string;
   displayOutputPath?: string;
   pipelineTestingMode: boolean;
   customWorkflowId?: string;
   waitForCompletion: boolean;
-  resumeFromWorkspace?: string;
+  workspaceName?: string;
 }
 
 function parseCliArgs(argv: string[]): CliArgs {
@@ -162,17 +110,24 @@ function parseCliArgs(argv: string[]): CliArgs {
   }
 
   let webUrl: string | undefined;
-  let repoPath: string | undefined;
+  let sourceInput: string | undefined;
   let configPath: string | undefined;
   let outputPath: string | undefined;
   let displayOutputPath: string | undefined;
   let pipelineTestingMode = false;
   let customWorkflowId: string | undefined;
   let waitForCompletion = false;
-  let resumeFromWorkspace: string | undefined;
+  let workspaceName: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
+    if (arg === '--source') {
+      const nextArg = argv[i + 1];
+      if (nextArg && !nextArg.startsWith('-')) {
+        sourceInput = nextArg;
+        i++;
+      }
+    } else
     if (arg === '--config') {
       const nextArg = argv[i + 1];
       if (nextArg && !nextArg.startsWith('-')) {
@@ -202,7 +157,7 @@ function parseCliArgs(argv: string[]): CliArgs {
     } else if (arg === '--workspace') {
       const nextArg = argv[i + 1];
       if (nextArg && !nextArg.startsWith('-')) {
-        resumeFromWorkspace = nextArg;
+        workspaceName = nextArg;
         i++;
       }
     } else if (arg === '--wait') {
@@ -210,25 +165,28 @@ function parseCliArgs(argv: string[]): CliArgs {
     } else if (arg && !arg.startsWith('-')) {
       if (!webUrl) {
         webUrl = arg;
-      } else if (!repoPath) {
-        repoPath = arg;
+      } else if (!sourceInput) {
+        sourceInput = arg;
       }
     }
   }
 
-  if (!webUrl || !repoPath) {
-    console.log('Error: webUrl and repoPath are required');
+  if (!webUrl) {
+    console.log('Error: webUrl is required');
     showUsage();
     process.exit(1);
   }
 
   return {
-    webUrl, repoPath, pipelineTestingMode, waitForCompletion,
+    webUrl,
+    ...(sourceInput && { sourceInput }),
+    pipelineTestingMode,
+    waitForCompletion,
     ...(configPath && { configPath }),
     ...(outputPath && { outputPath }),
     ...(displayOutputPath && { displayOutputPath }),
     ...(customWorkflowId && { customWorkflowId }),
-    ...(resumeFromWorkspace && { resumeFromWorkspace }),
+    ...(workspaceName && { workspaceName }),
   };
 }
 
@@ -237,56 +195,27 @@ function parseCliArgs(argv: string[]): CliArgs {
 interface WorkspaceResolution {
   workflowId: string;
   sessionId: string;
-  isResume: boolean;
-  terminatedWorkflows: string[];
 }
 
 async function resolveWorkspace(
-  client: Client,
   args: CliArgs
 ): Promise<WorkspaceResolution> {
-  if (!args.resumeFromWorkspace) {
+  if (!args.workspaceName) {
     const hostname = sanitizeHostname(args.webUrl);
     const workflowId = args.customWorkflowId || `${hostname}_shannon-${Date.now()}`;
     return {
       workflowId,
       sessionId: workflowId,
-      isResume: false,
-      terminatedWorkflows: [],
     };
   }
 
-  const workspace = args.resumeFromWorkspace;
+  const workspace = args.workspaceName;
   const sessionPath = path.join('./audit-logs', workspace, 'session.json');
   const workspaceExists = await fileExists(sessionPath);
 
   if (workspaceExists) {
-    console.log('=== RESUME MODE ===');
-    console.log(`Workspace: ${workspace}\n`);
-
-    // 1. Terminate any running workflows from previous attempts
-    const terminatedWorkflows = await terminateExistingWorkflows(client, workspace);
-    if (terminatedWorkflows.length > 0) {
-      console.log(`Terminated ${terminatedWorkflows.length} previous workflow(s)\n`);
-    }
-
-    // 2. Validate URL matches the workspace
-    const session = await readJson<SessionJson>(sessionPath);
-    if (session.session.webUrl !== args.webUrl) {
-      console.error('ERROR: URL mismatch with workspace');
-      console.error(`  Workspace URL: ${session.session.webUrl}`);
-      console.error(`  Provided URL:  ${args.webUrl}`);
-      process.exit(1);
-    }
-
-    // 3. Generate a new workflow ID scoped to this resume attempt
-    // 4. Return resolution with isResume=true so downstream uses resume logic
-    return {
-      workflowId: `${workspace}_resume_${Date.now()}`,
-      sessionId: workspace,
-      isResume: true,
-      terminatedWorkflows,
-    };
+    console.error('ERROR: Resume is disabled for URL-first runs. Start a new workspace.');
+    process.exit(1);
   }
 
   if (!isValidWorkspaceName(workspace)) {
@@ -301,8 +230,6 @@ async function resolveWorkspace(
   return {
     workflowId: `${workspace}_shannon-${Date.now()}`,
     sessionId: workspace,
-    isResume: false,
-    terminatedWorkflows: [],
   };
 }
 
@@ -335,14 +262,14 @@ function buildPipelineInput(
 ): PipelineInput {
   return {
     webUrl: args.webUrl,
-    repoPath: args.repoPath,
+    analysisMode: 'url-first',
+    discoveryProfile: 'aggressive-broad',
+    ...(args.sourceInput && { manualSource: args.sourceInput }),
     workflowId: workspace.workflowId,
     sessionId: workspace.sessionId,
     ...(args.configPath && { configPath: args.configPath }),
     ...(args.outputPath && { outputPath: args.outputPath }),
     ...(args.pipelineTestingMode && { pipelineTestingMode: args.pipelineTestingMode }),
-    ...(workspace.isResume && args.resumeFromWorkspace && { resumeFromWorkspace: args.resumeFromWorkspace }),
-    ...(workspace.terminatedWorkflows.length > 0 && { terminatedWorkflows: workspace.terminatedWorkflows }),
     ...(Object.keys(pipelineConfig).length > 0 && { pipelineConfig }),
   };
 }
@@ -351,12 +278,12 @@ function buildPipelineInput(
 
 function displayWorkflowInfo(args: CliArgs, workspace: WorkspaceResolution): void {
   console.log(`✓ Workflow started: ${workspace.workflowId}`);
-  if (workspace.isResume) {
-    console.log(`  (Resuming workspace: ${workspace.sessionId})`);
-  }
   console.log();
   console.log(`  Target:     ${args.webUrl}`);
-  console.log(`  Repository: ${args.repoPath}`);
+  console.log(`  Mode:       URL-first`);
+  if (args.sourceInput) {
+    console.log(`  Source:     ${args.sourceInput}`);
+  }
   console.log(`  Workspace:  ${workspace.sessionId}`);
   if (args.configPath) {
     console.log(`  Config:     ${args.configPath}`);
@@ -414,16 +341,14 @@ async function waitForWorkflowResult(
       console.log(`Total turns: ${result.summary.totalTurns}`);
       console.log(`Run cost: $${result.summary.totalCostUsd.toFixed(4)}`);
 
-      // 3. Show cumulative cost across all resume attempts
-      if (workspace.isResume) {
-        try {
-          const session = await readJson<SessionJson>(
-            path.join('./audit-logs', workspace.sessionId, 'session.json')
-          );
-          console.log(`Cumulative cost: $${session.metrics.total_cost_usd.toFixed(4)}`);
-        } catch {
-          // Non-fatal, skip cumulative cost display
-        }
+      // Show cumulative workspace cost when session metadata is available.
+      try {
+        const session = await readJson<SessionJson>(
+          path.join('./audit-logs', workspace.sessionId, 'session.json')
+        );
+        console.log(`Workspace cost: $${session.metrics.total_cost_usd.toFixed(4)}`);
+      } catch {
+        // Non-fatal, skip cost enrichment
       }
     }
   } catch (error) {
@@ -449,7 +374,7 @@ async function startPipeline(): Promise<void> {
 
   try {
     // 3. Resolve workspace (new or resume) and build pipeline input
-    const workspace = await resolveWorkspace(client, args);
+    const workspace = await resolveWorkspace(args);
     const pipelineConfig = await loadPipelineConfig(args.configPath);
     const input = buildPipelineInput(args, workspace, pipelineConfig);
 

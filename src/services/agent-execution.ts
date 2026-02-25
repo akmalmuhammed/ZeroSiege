@@ -51,6 +51,9 @@ import type { AgentMetrics } from '../types/metrics.js';
 export interface AgentExecutionInput {
   webUrl: string;
   repoPath: string;
+  analysisMode?: 'url-first';
+  sourceInventoryPath?: string;
+  harvestSummary?: string;
   configPath?: string | undefined;
   pipelineTestingMode?: boolean | undefined;
   attemptNumber: number;
@@ -96,7 +99,16 @@ export class AgentExecutionService {
     auditSession: AuditSession,
     logger: ActivityLogger
   ): Promise<Result<AgentEndResult, PentestError>> {
-    const { webUrl, repoPath, configPath, pipelineTestingMode = false, attemptNumber } = input;
+    const {
+      webUrl,
+      repoPath,
+      analysisMode = 'url-first',
+      sourceInventoryPath,
+      harvestSummary,
+      configPath,
+      pipelineTestingMode = false,
+      attemptNumber,
+    } = input;
 
     // 1. Load config (if provided)
     const configResult = await this.configLoader.loadOptional(configPath);
@@ -111,7 +123,13 @@ export class AgentExecutionService {
     try {
       prompt = await loadPrompt(
         promptTemplate,
-        { webUrl, repoPath },
+        {
+          webUrl,
+          repoPath,
+          analysisMode,
+          ...(sourceInventoryPath !== undefined && { sourceInventoryPath }),
+          ...(harvestSummary !== undefined && { harvestSummary }),
+        },
         distributedConfig,
         pipelineTestingMode,
         logger

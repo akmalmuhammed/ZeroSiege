@@ -15,6 +15,10 @@ export interface SessionMetadata {
   id: string;
   webUrl: string;
   repoPath?: string;
+  analysisMode?: 'url-first';
+  analysisPath?: string;
+  sourceOrigins?: string[];
+  resumeSupported?: boolean;
   outputPath?: string;
   [key: string]: unknown;
 }

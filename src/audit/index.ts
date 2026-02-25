@@ -11,7 +11,7 @@
  * and comprehensive metrics tracking for Shannon penetration testing sessions.
  *
  * IMPORTANT: Session objects must have an 'id' field (NOT 'sessionId')
- * Example: { id: "uuid", webUrl: "...", repoPath: "..." }
+ * Example: { id: "uuid", webUrl: "...", analysisPath: "/targets/<workspace>" }
  *
  * @module audit
  */

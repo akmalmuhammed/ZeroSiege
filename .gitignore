@@ -3,3 +3,5 @@ node_modules/
 audit-logs/
 dist/
 repos/
+targets/
+tmp/

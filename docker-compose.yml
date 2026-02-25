@@ -34,11 +34,41 @@ services:
       - ./audit-logs:/app/audit-logs
       - ${OUTPUT_DIR:-./audit-logs}:/app/output
       - ./repos:/repos
+      - ./targets:/targets
       - ${BENCHMARKS_BASE:-.}:/benchmarks
     shm_size: 2gb
     ipc: host
     security_opt:
       - seccomp:unconfined
+
+  studio:
+    build:
+      context: ./studio
+    environment:
+      - NODE_ENV=production
+      - TEMPORAL_ADDRESS=temporal:7233
+      - STUDIO_SESSION_SECRET=${STUDIO_SESSION_SECRET:-change-this-secret}
+      - STUDIO_ADMIN_USERNAME=${STUDIO_ADMIN_USERNAME:-admin}
+      - STUDIO_ADMIN_PASSWORD=${STUDIO_ADMIN_PASSWORD:-change-me-now}
+      - STUDIO_COOKIE_SECURE=${STUDIO_COOKIE_SECURE:-false}
+      - STUDIO_AUDIT_LOGS_DIR=/data/audit-logs
+      - STUDIO_REPOS_DIR=/repos
+      - STUDIO_CONFIGS_DIR=/data/configs
+      - STUDIO_SAMPLE_REPORTS_DIR=/data/sample-reports
+      - STUDIO_TARGETS_DIR=/targets
+    depends_on:
+      temporal:
+        condition: service_healthy
+      worker:
+        condition: service_started
+    ports:
+      - "3005:3000"
+    volumes:
+      - ./audit-logs:/data/audit-logs
+      - ./repos:/repos
+      - ./configs:/data/configs
+      - ./sample-reports:/data/sample-reports:ro
+      - ./targets:/targets:ro
 
   # Optional: claude-code-router for multi-model support
   # Start with: ROUTER=true ./shannon start ...

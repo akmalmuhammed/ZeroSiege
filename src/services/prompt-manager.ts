@@ -13,6 +13,9 @@ import type { ActivityLogger } from '../types/activity-logger.js';
 interface PromptVariables {
   webUrl: string;
   repoPath: string;
+  analysisMode?: 'url-first';
+  sourceInventoryPath?: string;
+  harvestSummary?: string;
   MCP_SERVER?: string;
 }
 
@@ -149,6 +152,15 @@ async function interpolateVariables(
     let result = template
       .replace(/{{WEB_URL}}/g, variables.webUrl)
       .replace(/{{REPO_PATH}}/g, variables.repoPath)
+      .replace(/{{ANALYSIS_MODE}}/g, variables.analysisMode || 'url-first')
+      .replace(
+        /{{SOURCE_INVENTORY_PATH}}/g,
+        variables.sourceInventoryPath || `${variables.repoPath}/manifest.json`
+      )
+      .replace(
+        /{{HARVEST_SUMMARY}}/g,
+        variables.harvestSummary || 'No harvest summary available.'
+      )
       .replace(/{{MCP_SERVER}}/g, variables.MCP_SERVER || 'playwright-agent1');
 
     if (config) {
@@ -214,7 +226,15 @@ export async function loadPrompt(
 ): Promise<string> {
   try {
     // 1. Resolve prompt file path
-    const baseDir = pipelineTestingMode ? 'prompts/pipeline-testing' : 'prompts';
+    const isUrlFirst = variables.analysisMode === 'url-first';
+    const baseDir =
+      pipelineTestingMode && isUrlFirst
+        ? 'prompts/pipeline-testing-url-first'
+        : pipelineTestingMode
+          ? 'prompts/pipeline-testing'
+          : isUrlFirst
+            ? 'prompts/url-first'
+            : 'prompts';
     const promptsDir = path.join(import.meta.dirname, '..', '..', baseDir);
     const promptPath = path.join(promptsDir, `${promptName}.txt`);
 

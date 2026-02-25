@@ -1,0 +1,10 @@
+{
+  email {$CADDY_ACME_EMAIL}
+}
+
+{$STUDIO_DOMAIN} {
+  encode zstd gzip
+
+  @studio path /*
+  reverse_proxy @studio studio:3000
+}

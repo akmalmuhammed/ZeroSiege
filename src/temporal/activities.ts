@@ -38,6 +38,8 @@ import type { ResumeAttempt } from '../audit/metrics-tracker.js';
 import { createActivityLogger } from './activity-logger.js';
 import { runPreflightChecks } from '../services/preflight.js';
 import { isErr } from '../types/result.js';
+import { prepareUrlWorkspace } from '../services/url-harvester.js';
+import type { AnalysisMode, DiscoveryProfile } from './shared.js';
 
 // Max lengths to prevent Temporal protobuf buffer overflow
 const MAX_ERROR_MESSAGE_LENGTH = 2000;
@@ -53,7 +55,17 @@ const HEARTBEAT_INTERVAL_MS = 2000;
  */
 export interface ActivityInput {
   webUrl: string;
-  repoPath: string;
+  analysisMode: AnalysisMode;
+  analysisPath: string;
+  /**
+   * Deprecated alias kept for compatibility with older logs/sessions.
+   */
+  repoPath?: string;
+  manualSource?: string;
+  discoveryProfile?: DiscoveryProfile;
+  sourceInventoryPath?: string;
+  harvestSummary?: string;
+  sourceOrigins?: string[];
   configPath?: string;
   outputPath?: string;
   pipelineTestingMode?: boolean;
@@ -84,11 +96,22 @@ function truncateStackTrace(failure: ApplicationFailure): void {
  * Build SessionMetadata from ActivityInput.
  */
 function buildSessionMetadata(input: ActivityInput): SessionMetadata {
-  const { webUrl, repoPath, outputPath, sessionId } = input;
+  const {
+    webUrl,
+    analysisMode,
+    analysisPath,
+    sourceOrigins,
+    outputPath,
+    sessionId,
+  } = input;
   return {
     id: sessionId,
     webUrl,
-    repoPath,
+    repoPath: analysisPath,
+    analysisMode,
+    analysisPath,
+    ...(sourceOrigins !== undefined && { sourceOrigins }),
+    resumeSupported: false,
     ...(outputPath && { outputPath }),
   };
 }
@@ -106,7 +129,16 @@ async function runAgentActivity(
   agentName: AgentName,
   input: ActivityInput
 ): Promise<AgentMetrics> {
-  const { repoPath, configPath, pipelineTestingMode = false, workflowId, webUrl } = input;
+  const {
+    analysisPath,
+    configPath,
+    pipelineTestingMode = false,
+    workflowId,
+    webUrl,
+    analysisMode,
+    sourceInventoryPath,
+    harvestSummary,
+  } = input;
   const startTime = Date.now();
   const attemptNumber = Context.current().info.attempt;
 
@@ -134,7 +166,10 @@ async function runAgentActivity(
       agentName,
       {
         webUrl,
-        repoPath,
+        repoPath: analysisPath,
+        analysisMode,
+        ...(sourceInventoryPath !== undefined && { sourceInventoryPath }),
+        ...(harvestSummary !== undefined && { harvestSummary }),
         configPath,
         pipelineTestingMode,
         attemptNumber,
@@ -248,11 +283,81 @@ export async function runReportAgent(input: ActivityInput): Promise<AgentMetrics
   return runAgentActivity('report', input);
 }
 
+export interface PrepareTargetResult {
+  analysisPath: string;
+  sourceOrigins: string[];
+  sourceInventoryPath: string;
+  harvestSummary: string;
+}
+
+/**
+ * Build URL-first workspace from a target URL.
+ *
+ * Creates /targets/<sessionId> with harvested artifacts and optional source clones.
+ */
+export async function prepareUrlWorkspaceActivity(
+  input: ActivityInput
+): Promise<PrepareTargetResult> {
+  const startTime = Date.now();
+  const attemptNumber = Context.current().info.attempt;
+
+  const heartbeatInterval = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    heartbeat({ phase: 'prepare-target', elapsedSeconds: elapsed, attempt: attemptNumber });
+  }, HEARTBEAT_INTERVAL_MS);
+
+  try {
+    const logger = createActivityLogger();
+    logger.info('Preparing URL-first workspace...', { webUrl: input.webUrl, sessionId: input.sessionId });
+
+    const result = await prepareUrlWorkspace(
+      {
+        webUrl: input.webUrl,
+        sessionId: input.sessionId,
+        ...(input.manualSource !== undefined && { manualSource: input.manualSource }),
+        ...(input.configPath !== undefined && { configPath: input.configPath }),
+        discoveryProfile: input.discoveryProfile || 'aggressive-broad',
+      },
+      logger
+    );
+
+    logger.info('URL-first workspace ready', {
+      analysisPath: result.analysisPath,
+      sourceOrigins: result.sourceOrigins.length,
+    });
+
+    return {
+      analysisPath: result.analysisPath,
+      sourceOrigins: result.sourceOrigins,
+      sourceInventoryPath: result.sourceInventoryPath,
+      harvestSummary: result.harvestSummary,
+    };
+  } catch (error) {
+    const classified = classifyErrorForTemporal(error);
+    const rawMessage = error instanceof Error ? error.message : String(error);
+    const message = truncateErrorMessage(rawMessage);
+
+    const failure = classified.retryable
+      ? ApplicationFailure.create({
+          message,
+          type: classified.type,
+          details: [{ phase: 'prepare-target', attemptNumber, elapsed: Date.now() - startTime }],
+        })
+      : ApplicationFailure.nonRetryable(message, classified.type, [
+          { phase: 'prepare-target', attemptNumber, elapsed: Date.now() - startTime },
+        ]);
+    truncateStackTrace(failure);
+    throw failure;
+  } finally {
+    clearInterval(heartbeatInterval);
+  }
+}
+
 /**
  * Preflight validation activity.
  *
  * Runs cheap checks before any agent execution:
- * 1. Repository path exists with .git
+ * 1. Analysis path exists and is writable
  * 2. Config file validates (if provided)
  * 3. Credential validation (API key, OAuth, or router mode)
  *
@@ -271,7 +376,7 @@ export async function runPreflightValidation(input: ActivityInput): Promise<void
     const logger = createActivityLogger();
     logger.info('Running preflight validation...', { attempt: attemptNumber });
 
-    const result = await runPreflightChecks(input.repoPath, input.configPath, logger);
+    const result = await runPreflightChecks(input.analysisPath, input.configPath, logger);
 
     if (isErr(result)) {
       const classified = classifyErrorForTemporal(result.error);
@@ -318,7 +423,7 @@ export async function runPreflightValidation(input: ActivityInput): Promise<void
  * Assemble the final report by concatenating exploitation evidence files.
  */
 export async function assembleReportActivity(input: ActivityInput): Promise<void> {
-  const { repoPath } = input;
+  const repoPath = input.analysisPath;
   const logger = createActivityLogger();
   logger.info('Assembling deliverables from specialist agents...');
   try {
@@ -333,7 +438,8 @@ export async function assembleReportActivity(input: ActivityInput): Promise<void
  * Inject model metadata into the final report.
  */
 export async function injectReportMetadataActivity(input: ActivityInput): Promise<void> {
-  const { repoPath, sessionId, outputPath } = input;
+  const { sessionId, outputPath } = input;
+  const repoPath = input.analysisPath;
   const logger = createActivityLogger();
   const effectiveOutputPath = outputPath
     ? path.join(outputPath, sessionId)
@@ -356,7 +462,8 @@ export async function checkExploitationQueue(
   input: ActivityInput,
   vulnType: VulnType
 ): Promise<ExploitationDecision> {
-  const { repoPath, workflowId } = input;
+  const { workflowId } = input;
+  const repoPath = input.analysisPath;
   const logger = createActivityLogger();
 
   // Reuse container's service if available (from prior vuln agent runs)
@@ -604,7 +711,8 @@ export async function logWorkflowComplete(
   input: ActivityInput,
   summary: WorkflowSummary
 ): Promise<void> {
-  const { repoPath, workflowId } = input;
+  const { workflowId } = input;
+  const repoPath = input.analysisPath;
   const sessionMetadata = buildSessionMetadata(input);
 
   // 1. Initialize audit session and mark final status

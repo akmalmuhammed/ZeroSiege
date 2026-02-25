@@ -95,6 +95,111 @@
       },
       "additionalProperties": false
     },
+    "url_harvest": {
+      "type": "object",
+      "description": "URL-first target harvesting controls",
+      "properties": {
+        "max_pages": {
+          "type": "string",
+          "pattern": "^[0-9]{1,5}$",
+          "description": "Maximum HTML pages to crawl"
+        },
+        "max_depth": {
+          "type": "string",
+          "pattern": "^[0-9]{1,2}$",
+          "description": "Maximum crawl depth"
+        },
+        "max_assets": {
+          "type": "string",
+          "pattern": "^[0-9]{1,6}$",
+          "description": "Maximum non-HTML assets to download"
+        },
+        "max_discovered_domains": {
+          "type": "string",
+          "pattern": "^[0-9]{1,3}$",
+          "description": "Maximum discovered domains allowed in broad discovery"
+        },
+        "max_endpoint_probes": {
+          "type": "string",
+          "pattern": "^[0-9]{1,6}$",
+          "description": "Maximum endpoint probes"
+        },
+        "http_concurrency": {
+          "type": "string",
+          "pattern": "^[0-9]{1,3}$",
+          "description": "HTTP fetch concurrency"
+        },
+        "probe_concurrency": {
+          "type": "string",
+          "pattern": "^[0-9]{1,3}$",
+          "description": "Endpoint probe concurrency"
+        },
+        "harvest_timeout_minutes": {
+          "type": "string",
+          "pattern": "^[0-9]{1,3}$",
+          "description": "Maximum harvest runtime in minutes"
+        },
+        "auto_clone_public_repos": {
+          "type": "string",
+          "enum": ["true", "false"],
+          "description": "Automatically clone discovered public repository URLs"
+        },
+        "scope_policy": {
+          "type": "string",
+          "enum": ["same-origin", "first-party", "broad-discovery"],
+          "description": "Scope boundary policy for discovered domains"
+        },
+        "auth": {
+          "type": "object",
+          "description": "Optional authenticated URL harvesting profile. Applied only to first-party requests.",
+          "properties": {
+            "headers": {
+              "type": "object",
+              "description": "Additional request headers for authenticated harvesting",
+              "additionalProperties": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "maxProperties": 50
+            },
+            "cookies": {
+              "type": "object",
+              "description": "Cookie key/value map converted into a Cookie header",
+              "additionalProperties": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "maxProperties": 50
+            },
+            "bearer_token": {
+              "type": "string",
+              "maxLength": 8192,
+              "description": "Bearer token value added as Authorization: Bearer <token>"
+            },
+            "basic_auth": {
+              "type": "object",
+              "description": "HTTP Basic auth credentials",
+              "properties": {
+                "username": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1024
+                },
+                "password": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                }
+              },
+              "required": ["username", "password"],
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "rules": {
       "type": "object",
       "description": "Testing rules that define what to focus on or avoid during penetration testing",
@@ -127,7 +232,9 @@
   "anyOf": [
     {"required": ["authentication"]},
     {"required": ["rules"]},
-    {"required": ["authentication", "rules"]}
+    {"required": ["authentication", "rules"]},
+    {"required": ["pipeline"]},
+    {"required": ["url_harvest"]}
   ],
   "additionalProperties": false,
   "$defs": {

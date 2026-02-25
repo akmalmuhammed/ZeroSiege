@@ -1,0 +1,16 @@
+Mode: {{ANALYSIS_MODE}}
+Target URL: {{WEB_URL}}
+Workspace Path: {{REPO_PATH}}
+Source Inventory: {{SOURCE_INVENTORY_PATH}}
+Harvest Summary: {{HARVEST_SUMMARY}}
+
+Perform authentication vulnerability analysis from URL-first evidence.
+Cover login flows, session handling, token controls, and reset/account recovery paths.
+Only include externally exploitable findings.
+
+1. Write `deliverables/auth_analysis_deliverable.md`.
+2. Save with `save_deliverable` type `AUTH_ANALYSIS` and `file_path`.
+3. Save queue with `save_deliverable` type `AUTH_QUEUE` and
+   `content: {"vulnerabilities":[...]}` (empty list if none).
+
+Output: AUTH ANALYSIS COMPLETE

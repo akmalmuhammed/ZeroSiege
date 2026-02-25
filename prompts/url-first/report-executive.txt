@@ -1,0 +1,15 @@
+Mode: {{ANALYSIS_MODE}}
+Target URL: {{WEB_URL}}
+Workspace Path: {{REPO_PATH}}
+Source Inventory: {{SOURCE_INVENTORY_PATH}}
+Harvest Summary: {{HARVEST_SUMMARY}}
+
+Assemble and clean the final security report from all specialist evidence files in `deliverables/`.
+
+Requirements:
+1. Add executive summary and reconnaissance highlights at the top.
+2. Preserve only verified, externally relevant exploitation evidence.
+3. Remove obvious hallucinated/meta filler sections.
+4. Save final report to `deliverables/comprehensive_security_assessment_report.md`.
+
+After finishing, output: REPORTING COMPLETE

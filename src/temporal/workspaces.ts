@@ -101,7 +101,7 @@ async function listWorkspaces(): Promise<void> {
 
   if (workspaces.length === 0) {
     console.log('\nNo workspaces found.');
-    console.log('Run a pipeline first: ./shannon start URL=<url> REPO=<repo>');
+    console.log('Run a pipeline first: ./shannon start URL=<url> [SOURCE=<git-url|local-repo>]');
     return;
   }
 
@@ -128,21 +128,12 @@ async function listWorkspaces(): Promise<void> {
   );
   console.log('  ' + '\u2500'.repeat(nameWidth + urlWidth + statusWidth + durationWidth + costWidth));
 
-  let resumableCount = 0;
-
   for (const ws of workspaces) {
     const now = new Date();
     const endTime = ws.completedAt || now;
     const durationMs = endTime.getTime() - ws.createdAt.getTime();
     const duration = formatDuration(durationMs);
     const cost = `$${ws.costUsd.toFixed(2)}`;
-    const isResumable = ws.status !== 'completed';
-
-    if (isResumable) {
-      resumableCount++;
-    }
-
-    const resumeTag = isResumable ? ' (resumable)' : '';
 
     console.log(
       '  ' +
@@ -150,19 +141,14 @@ async function listWorkspaces(): Promise<void> {
       truncate(ws.url, urlWidth - 2).padEnd(urlWidth) +
       getStatusDisplay(ws.status).padEnd(statusWidth) +
       duration.padEnd(durationWidth) +
-      cost.padEnd(costWidth) +
-      resumeTag
+      cost.padEnd(costWidth)
     );
   }
 
   console.log();
   const summary = `${workspaces.length} workspace${workspaces.length === 1 ? '' : 's'} found`;
-  const resumeSummary = resumableCount > 0 ? ` (${resumableCount} resumable)` : '';
-  console.log(`${summary}${resumeSummary}`);
-
-  if (resumableCount > 0) {
-    console.log('\nResume with: ./shannon start URL=<url> REPO=<repo> WORKSPACE=<name>');
-  }
+  console.log(summary);
+  console.log('\nNote: URL-first mode does not support resume. Start a new workspace name.');
 
   console.log();
 }

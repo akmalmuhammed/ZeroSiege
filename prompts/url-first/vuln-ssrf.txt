@@ -1,0 +1,15 @@
+Mode: {{ANALYSIS_MODE}}
+Target URL: {{WEB_URL}}
+Workspace Path: {{REPO_PATH}}
+Source Inventory: {{SOURCE_INVENTORY_PATH}}
+Harvest Summary: {{HARVEST_SUMMARY}}
+
+Perform SSRF vulnerability analysis from URL-first evidence.
+Trace attacker-controlled input into server-side request behavior and include only externally exploitable findings.
+
+1. Write `deliverables/ssrf_analysis_deliverable.md`.
+2. Save with `save_deliverable` type `SSRF_ANALYSIS` and `file_path`.
+3. Save queue with `save_deliverable` type `SSRF_QUEUE` and
+   `content: {"vulnerabilities":[...]}` (empty list if none).
+
+Output: SSRF ANALYSIS COMPLETE
