@@ -178,6 +178,7 @@ export async function pentestPipelineWorkflow(
     ...(input.repoPath !== undefined && { repoPath: input.repoPath }),
     ...(input.manualSource !== undefined && { manualSource: input.manualSource }),
     ...(input.discoveryProfile !== undefined && { discoveryProfile: input.discoveryProfile }),
+    ...(input.credentialRef !== undefined && { credentialRef: input.credentialRef }),
     workflowId,
     sessionId,
     ...(input.configPath !== undefined && { configPath: input.configPath }),

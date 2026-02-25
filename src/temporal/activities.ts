@@ -50,6 +50,101 @@ const MAX_OUTPUT_VALIDATION_RETRIES = 3;
 
 const HEARTBEAT_INTERVAL_MS = 2000;
 
+const RUNTIME_SECRET_REF_REGEX = /^[a-f0-9]{32}$/i;
+const ALLOWED_RUNTIME_ENV_KEYS = new Set([
+  'ANTHROPIC_API_KEY',
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ROUTER_DEFAULT',
+  'CLAUDE_CODE_MAX_OUTPUT_TOKENS',
+]);
+
+interface RuntimeCredentialSecretFile {
+  createdAt: string;
+  env: Record<string, string>;
+}
+
+const runtimeCredentialCache = new Map<string, Record<string, string>>();
+
+function getRuntimeSecretsDir(): string {
+  return process.env.SHANNON_RUNTIME_SECRETS_DIR || '/app/configs/.runtime-secrets';
+}
+
+async function resolveRuntimeCredentialEnv(
+  credentialRef: string | undefined
+): Promise<Record<string, string>> {
+  if (!credentialRef) return {};
+
+  if (!RUNTIME_SECRET_REF_REGEX.test(credentialRef)) {
+    throw new PentestError(
+      'Invalid runtime credential reference format',
+      'config',
+      false,
+      { credentialRef },
+      ErrorCode.AUTH_FAILED
+    );
+  }
+
+  const cached = runtimeCredentialCache.get(credentialRef);
+  if (cached) {
+    return cached;
+  }
+
+  const secretPath = path.join(getRuntimeSecretsDir(), `${credentialRef}.json`);
+  let parsed: RuntimeCredentialSecretFile;
+  try {
+    const raw = await fs.readFile(secretPath, 'utf8');
+    parsed = JSON.parse(raw) as RuntimeCredentialSecretFile;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new PentestError(
+      `Runtime credential secret could not be loaded: ${message}`,
+      'config',
+      false,
+      { credentialRef },
+      ErrorCode.AUTH_FAILED
+    );
+  }
+
+  const sanitized: Record<string, string> = {};
+  for (const [key, value] of Object.entries(parsed.env ?? {})) {
+    if (!ALLOWED_RUNTIME_ENV_KEYS.has(key)) continue;
+    if (typeof value !== 'string') continue;
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    sanitized[key] = trimmed;
+  }
+
+  if (Object.keys(sanitized).length === 0) {
+    throw new PentestError(
+      'Runtime credential secret did not contain valid credential values',
+      'config',
+      false,
+      { credentialRef },
+      ErrorCode.AUTH_FAILED
+    );
+  }
+
+  runtimeCredentialCache.set(credentialRef, sanitized);
+  return sanitized;
+}
+
+async function cleanupRuntimeCredentialSecret(
+  credentialRef: string | undefined,
+  logger: ReturnType<typeof createActivityLogger>
+): Promise<void> {
+  if (!credentialRef || !RUNTIME_SECRET_REF_REGEX.test(credentialRef)) {
+    return;
+  }
+
+  runtimeCredentialCache.delete(credentialRef);
+  const secretPath = path.join(getRuntimeSecretsDir(), `${credentialRef}.json`);
+  await fs.rm(secretPath, { force: true }).catch(() => {
+    logger.warn('Unable to remove runtime credential secret file during workflow cleanup');
+  });
+}
+
 /**
  * Input for all agent activities.
  */
@@ -63,6 +158,7 @@ export interface ActivityInput {
   repoPath?: string;
   manualSource?: string;
   discoveryProfile?: DiscoveryProfile;
+  credentialRef?: string;
   sourceInventoryPath?: string;
   harvestSummary?: string;
   sourceOrigins?: string[];
@@ -133,6 +229,7 @@ async function runAgentActivity(
     analysisPath,
     configPath,
     pipelineTestingMode = false,
+    credentialRef,
     workflowId,
     webUrl,
     analysisMode,
@@ -150,6 +247,7 @@ async function runAgentActivity(
 
   try {
     const logger = createActivityLogger();
+    const runtimeCredentialEnv = await resolveRuntimeCredentialEnv(credentialRef);
 
     // 1. Build session metadata and get/create container
     const sessionMetadata = buildSessionMetadata(input);
@@ -172,6 +270,7 @@ async function runAgentActivity(
         ...(harvestSummary !== undefined && { harvestSummary }),
         configPath,
         pipelineTestingMode,
+        ...(Object.keys(runtimeCredentialEnv).length > 0 && { runtimeCredentialEnv }),
         attemptNumber,
       },
       auditSession,
@@ -375,8 +474,14 @@ export async function runPreflightValidation(input: ActivityInput): Promise<void
   try {
     const logger = createActivityLogger();
     logger.info('Running preflight validation...', { attempt: attemptNumber });
+    const runtimeCredentialEnv = await resolveRuntimeCredentialEnv(input.credentialRef);
 
-    const result = await runPreflightChecks(input.analysisPath, input.configPath, logger);
+    const result = await runPreflightChecks(
+      input.analysisPath,
+      input.configPath,
+      logger,
+      runtimeCredentialEnv
+    );
 
     if (isErr(result)) {
       const classified = classifyErrorForTemporal(result.error);
@@ -711,6 +816,7 @@ export async function logWorkflowComplete(
   input: ActivityInput,
   summary: WorkflowSummary
 ): Promise<void> {
+  const logger = createActivityLogger();
   const { workflowId } = input;
   const repoPath = input.analysisPath;
   const sessionMetadata = buildSessionMetadata(input);
@@ -758,7 +864,6 @@ export async function logWorkflowComplete(
   try {
     await copyDeliverablesToAudit(sessionMetadata, repoPath);
   } catch (copyErr) {
-    const logger = createActivityLogger();
     logger.error('Failed to copy deliverables to audit-logs', {
       error: copyErr instanceof Error ? copyErr.message : String(copyErr),
     });
@@ -766,4 +871,7 @@ export async function logWorkflowComplete(
 
   // 7. Clean up container
   removeContainer(workflowId);
+
+  // 8. Best-effort cleanup of per-run runtime credentials
+  await cleanupRuntimeCredentialSecret(input.credentialRef, logger);
 }

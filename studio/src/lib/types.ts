@@ -83,4 +83,6 @@ export interface PipelineInputDto {
   workspace?: string;
   configFile?: string;
   pipelineTestingMode?: boolean;
+  aiCredentialMode?: "env" | "anthropic_api_key" | "claude_oauth_token";
+  aiCredentialValue?: string;
 }

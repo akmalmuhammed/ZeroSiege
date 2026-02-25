@@ -16,6 +16,10 @@ export function ScanLaunchForm({ repoHints = [], configFiles }: Props) {
   const [workspace, setWorkspace] = useState("");
   const [configFile, setConfigFile] = useState("");
   const [pipelineTestingMode, setPipelineTestingMode] = useState(false);
+  const [aiCredentialMode, setAiCredentialMode] = useState<
+    "env" | "anthropic_api_key" | "claude_oauth_token"
+  >("env");
+  const [aiCredentialValue, setAiCredentialValue] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,6 +37,9 @@ export function ScanLaunchForm({ repoHints = [], configFiles }: Props) {
         workspace: workspace || undefined,
         configFile: configFile || undefined,
         pipelineTestingMode,
+        aiCredentialMode,
+        aiCredentialValue:
+          aiCredentialMode === "env" ? undefined : aiCredentialValue || undefined,
       }),
     });
 
@@ -107,6 +114,37 @@ export function ScanLaunchForm({ repoHints = [], configFiles }: Props) {
         />
         Run in pipeline testing mode (minimal prompts and faster retries)
       </label>
+      <label className="field">
+        AI Credential Source
+        <select
+          value={aiCredentialMode}
+          onChange={(event) =>
+            setAiCredentialMode(
+              event.target.value as "env" | "anthropic_api_key" | "claude_oauth_token"
+            )
+          }
+        >
+          <option value="env">Use server .env credentials</option>
+          <option value="anthropic_api_key">Use Anthropic API key (this run only)</option>
+          <option value="claude_oauth_token">Use Claude OAuth token (this run only)</option>
+        </select>
+      </label>
+      {aiCredentialMode !== "env" ? (
+        <label className="field">
+          AI Key / Token (run-only)
+          <input
+            type="password"
+            value={aiCredentialValue}
+            onChange={(event) => setAiCredentialValue(event.target.value)}
+            placeholder={
+              aiCredentialMode === "anthropic_api_key"
+                ? "sk-ant-..."
+                : "claude-oauth-token"
+            }
+            required
+          />
+        </label>
+      ) : null}
       {error ? <p className="error-text">{error}</p> : null}
       <button className="primary-button" type="submit" disabled={loading}>
         {loading ? "Starting workflow..." : "Start Workflow"}

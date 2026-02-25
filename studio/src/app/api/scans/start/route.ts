@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import crypto from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { requireApiAuth } from "@/lib/api-auth";
 import { studioEnv } from "@/lib/env";
@@ -13,6 +14,53 @@ import {
   buildWorkerConfigPath,
   sanitizeHostname,
 } from "@/lib/workspaces";
+
+type AiCredentialMode = "env" | "anthropic_api_key" | "claude_oauth_token";
+
+function isValidAiCredentialMode(value: string): value is AiCredentialMode {
+  return (
+    value === "env" ||
+    value === "anthropic_api_key" ||
+    value === "claude_oauth_token"
+  );
+}
+
+function buildRuntimeCredentialEnv(
+  mode: Exclude<AiCredentialMode, "env">,
+  value: string
+): Record<string, string> {
+  if (mode === "anthropic_api_key") {
+    return { ANTHROPIC_API_KEY: value };
+  }
+  return { CLAUDE_CODE_OAUTH_TOKEN: value };
+}
+
+async function writeRuntimeCredentialSecret(
+  env: Record<string, string>
+): Promise<string> {
+  const ref = crypto.randomBytes(16).toString("hex");
+  await fs.mkdir(studioEnv.runtimeSecretsDir, { recursive: true, mode: 0o777 });
+  await fs.chmod(studioEnv.runtimeSecretsDir, 0o777).catch(() => undefined);
+  const secretPath = path.join(studioEnv.runtimeSecretsDir, `${ref}.json`);
+  await fs.writeFile(
+    secretPath,
+    JSON.stringify(
+      {
+        createdAt: new Date().toISOString(),
+        env,
+      },
+      null,
+      2
+    ),
+    { encoding: "utf8", mode: 0o644 }
+  );
+  return ref;
+}
+
+async function removeRuntimeCredentialSecret(ref: string): Promise<void> {
+  const secretPath = path.join(studioEnv.runtimeSecretsDir, `${ref}.json`);
+  await fs.rm(secretPath, { force: true }).catch(() => undefined);
+}
 
 async function fileExists(filePath: string): Promise<boolean> {
   try {
@@ -54,7 +102,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const webUrl = body.webUrl?.trim();
+  const webUrl = typeof body.webUrl === "string" ? body.webUrl.trim() : "";
   if (!webUrl) {
     return NextResponse.json({ ok: false, error: "webUrl is required" }, { status: 400 });
   }
@@ -63,7 +111,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: false, error: "Invalid webUrl" }, { status: 400 });
   }
 
-  const manualSource = body.manualSource?.trim();
+  const manualSource =
+    typeof body.manualSource === "string" ? body.manualSource.trim() : undefined;
   if (manualSource && !isValidManualSource(manualSource)) {
     return NextResponse.json(
       {
@@ -75,11 +124,45 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     );
   }
 
+  const aiCredentialModeRaw =
+    typeof body.aiCredentialMode === "string" ? body.aiCredentialMode.trim() : "env";
+  if (!isValidAiCredentialMode(aiCredentialModeRaw)) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          "Invalid aiCredentialMode. Use env, anthropic_api_key, or claude_oauth_token.",
+      },
+      { status: 400 }
+    );
+  }
+
+  const aiCredentialMode = aiCredentialModeRaw as AiCredentialMode;
+  const aiCredentialValue =
+    typeof body.aiCredentialValue === "string"
+      ? body.aiCredentialValue.trim()
+      : undefined;
+  if (aiCredentialMode !== "env") {
+    if (!aiCredentialValue) {
+      return NextResponse.json(
+        { ok: false, error: "AI credential value is required for selected mode." },
+        { status: 400 }
+      );
+    }
+    if (aiCredentialValue.length > 16_384) {
+      return NextResponse.json(
+        { ok: false, error: "AI credential value is too long." },
+        { status: 400 }
+      );
+    }
+  }
+
   let workflowId: string;
   let sessionId: string;
   const mode: "new" = "new";
 
-  const requestedWorkspace = body.workspace?.trim();
+  const requestedWorkspace =
+    typeof body.workspace === "string" ? body.workspace.trim() : undefined;
   if (requestedWorkspace) {
     const workspace = assertWorkspaceName(requestedWorkspace);
     const sessionPath = path.join(studioEnv.auditLogsDir, workspace, "session.json");
@@ -108,8 +191,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     pipelineInput.manualSource = manualSource;
   }
 
-  if (body.configFile) {
-    const configName = path.basename(body.configFile);
+  if (typeof body.configFile === "string" && body.configFile.trim()) {
+    const configName = path.basename(body.configFile.trim());
     const configHostPath = path.join(studioEnv.configsDir, configName);
     if (!(await fileExists(configHostPath))) {
       return NextResponse.json(
@@ -124,21 +207,40 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     pipelineInput.pipelineTestingMode = true;
   }
 
-  await startPipelineWorkflow(
-    workflowId,
-    pipelineInput as {
-      webUrl: string;
-      analysisMode: "url-first";
-      discoveryProfile?: "aggressive-broad";
-      manualSource?: string;
-      repoPath?: string;
-      configPath?: string;
-      outputPath?: string;
-      pipelineTestingMode?: boolean;
-      workflowId?: string;
-      sessionId?: string;
+  let credentialRef: string | undefined;
+  if (aiCredentialMode !== "env" && aiCredentialValue) {
+    const env = buildRuntimeCredentialEnv(aiCredentialMode, aiCredentialValue);
+    credentialRef = await writeRuntimeCredentialSecret(env);
+    pipelineInput.credentialRef = credentialRef;
+  }
+
+  try {
+    await startPipelineWorkflow(
+      workflowId,
+      pipelineInput as {
+        webUrl: string;
+        analysisMode: "url-first";
+        discoveryProfile?: "aggressive-broad";
+        manualSource?: string;
+        credentialRef?: string;
+        repoPath?: string;
+        configPath?: string;
+        outputPath?: string;
+        pipelineTestingMode?: boolean;
+        workflowId?: string;
+        sessionId?: string;
+      }
+    );
+  } catch (error) {
+    if (credentialRef) {
+      await removeRuntimeCredentialSecret(credentialRef);
     }
-  );
+    const message = error instanceof Error ? error.message : String(error);
+    return NextResponse.json(
+      { ok: false, error: `Failed to start workflow: ${message}` },
+      { status: 500 }
+    );
+  }
 
   return NextResponse.json({
     ok: true,

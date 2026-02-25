@@ -17,6 +17,11 @@ export interface PipelineInput {
   analysisMode: AnalysisMode;
   manualSource?: string;
   discoveryProfile?: DiscoveryProfile;
+  /**
+   * Runtime credential reference created by Studio for per-run AI auth.
+   * The actual secret value is stored outside workflow history.
+   */
+  credentialRef?: string;
   configPath?: string;
   outputPath?: string;
   pipelineTestingMode?: boolean;

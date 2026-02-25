@@ -120,7 +120,7 @@ function classifySdkError(
   switch (sdkError) {
     case 'authentication_failed':
       return err(new PentestError(
-        `Invalid ${authType}. Check your credentials in .env and try again.`,
+        `Invalid ${authType}. Check your credentials and try again.`,
         'config', false, { authType, sdkError }, ErrorCode.AUTH_FAILED
       ));
     case 'billing_error':
@@ -140,7 +140,7 @@ function classifySdkError(
       ));
     default:
       return err(new PentestError(
-        `${authType} validation failed unexpectedly. Check your credentials in .env.`,
+        `${authType} validation failed unexpectedly. Check your credentials.`,
         'config', false, { authType, sdkError }, ErrorCode.AUTH_FAILED
       ));
   }
@@ -148,19 +148,35 @@ function classifySdkError(
 
 /** Validate credentials via a minimal Claude Agent SDK query. */
 async function validateCredentials(
-  logger: ActivityLogger
+  logger: ActivityLogger,
+  runtimeCredentialEnv: Record<string, string> = {}
 ): Promise<Result<void, PentestError>> {
-  // 1. Router mode — can't validate provider keys, just warn
-  if (process.env.ANTHROPIC_BASE_URL) {
-    logger.warn('Router mode detected — skipping API credential validation');
+  const mergedEnv = {
+    ANTHROPIC_API_KEY: runtimeCredentialEnv.ANTHROPIC_API_KEY ?? process.env.ANTHROPIC_API_KEY,
+    CLAUDE_CODE_OAUTH_TOKEN:
+      runtimeCredentialEnv.CLAUDE_CODE_OAUTH_TOKEN ?? process.env.CLAUDE_CODE_OAUTH_TOKEN,
+    ANTHROPIC_BASE_URL:
+      runtimeCredentialEnv.ANTHROPIC_BASE_URL ?? process.env.ANTHROPIC_BASE_URL,
+    ANTHROPIC_AUTH_TOKEN:
+      runtimeCredentialEnv.ANTHROPIC_AUTH_TOKEN ?? process.env.ANTHROPIC_AUTH_TOKEN,
+    ROUTER_DEFAULT: runtimeCredentialEnv.ROUTER_DEFAULT ?? process.env.ROUTER_DEFAULT,
+    CLAUDE_CODE_MAX_OUTPUT_TOKENS:
+      runtimeCredentialEnv.CLAUDE_CODE_MAX_OUTPUT_TOKENS ??
+      process.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS ??
+      '64000',
+  };
+
+  // 1. Router mode - can't validate provider keys, just warn
+  if (mergedEnv.ANTHROPIC_BASE_URL) {
+    logger.warn('Router mode detected - skipping API credential validation');
     return ok(undefined);
   }
 
   // 2. Check that at least one credential is present
-  if (!process.env.ANTHROPIC_API_KEY && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+  if (!mergedEnv.ANTHROPIC_API_KEY && !mergedEnv.CLAUDE_CODE_OAUTH_TOKEN) {
     return err(
       new PentestError(
-        'No API credentials found. Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN in .env',
+        'No API credentials found. Provide ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN via env or run settings.',
         'config',
         false,
         {},
@@ -170,11 +186,37 @@ async function validateCredentials(
   }
 
   // 3. Validate via SDK query
-  const authType = process.env.CLAUDE_CODE_OAUTH_TOKEN ? 'OAuth token' : 'API key';
+  const authType = mergedEnv.CLAUDE_CODE_OAUTH_TOKEN ? 'OAuth token' : 'API key';
   logger.info(`Validating ${authType} via SDK...`);
 
+  const sdkEnv: Record<string, string> = {
+    CLAUDE_CODE_MAX_OUTPUT_TOKENS: mergedEnv.CLAUDE_CODE_MAX_OUTPUT_TOKENS,
+  };
+  if (mergedEnv.ANTHROPIC_API_KEY) {
+    sdkEnv.ANTHROPIC_API_KEY = mergedEnv.ANTHROPIC_API_KEY;
+  }
+  if (mergedEnv.CLAUDE_CODE_OAUTH_TOKEN) {
+    sdkEnv.CLAUDE_CODE_OAUTH_TOKEN = mergedEnv.CLAUDE_CODE_OAUTH_TOKEN;
+  }
+  if (mergedEnv.ANTHROPIC_BASE_URL) {
+    sdkEnv.ANTHROPIC_BASE_URL = mergedEnv.ANTHROPIC_BASE_URL;
+  }
+  if (mergedEnv.ANTHROPIC_AUTH_TOKEN) {
+    sdkEnv.ANTHROPIC_AUTH_TOKEN = mergedEnv.ANTHROPIC_AUTH_TOKEN;
+  }
+  if (mergedEnv.ROUTER_DEFAULT) {
+    sdkEnv.ROUTER_DEFAULT = mergedEnv.ROUTER_DEFAULT;
+  }
+
   try {
-    for await (const message of query({ prompt: 'hi', options: { model: 'claude-haiku-4-5-20251001', maxTurns: 1 } })) {
+    for await (const message of query({
+      prompt: 'hi',
+      options: {
+        model: 'claude-haiku-4-5-20251001',
+        maxTurns: 1,
+        env: sdkEnv,
+      },
+    })) {
       if (message.type === 'assistant' && message.error) {
         return classifySdkError(message.error, authType);
       }
@@ -192,7 +234,7 @@ async function validateCredentials(
     return err(
       new PentestError(
         retryable
-          ? `Failed to reach Anthropic API. Check your network connection.`
+          ? 'Failed to reach Anthropic API. Check your network connection.'
           : `${authType} validation failed: ${message}`,
         retryable ? 'network' : 'config',
         retryable,
@@ -202,7 +244,6 @@ async function validateCredentials(
     );
   }
 }
-
 // === Preflight Orchestrator ===
 
 /**
@@ -217,7 +258,8 @@ async function validateCredentials(
 export async function runPreflightChecks(
   analysisPath: string,
   configPath: string | undefined,
-  logger: ActivityLogger
+  logger: ActivityLogger,
+  runtimeCredentialEnv: Record<string, string> = {}
 ): Promise<Result<void, PentestError>> {
   // 1. Analysis path check (free - filesystem only)
   const pathResult = await validateAnalysisPath(analysisPath, logger);
@@ -225,7 +267,7 @@ export async function runPreflightChecks(
     return pathResult;
   }
 
-  // 2. Config check (free — filesystem + CPU)
+  // 2. Config check (free - filesystem + CPU)
   if (configPath) {
     const configResult = await validateConfig(configPath, logger);
     if (!configResult.ok) {
@@ -233,8 +275,8 @@ export async function runPreflightChecks(
     }
   }
 
-  // 3. Credential check (cheap — 1 SDK round-trip)
-  const credResult = await validateCredentials(logger);
+  // 3. Credential check (cheap - 1 SDK round-trip)
+  const credResult = await validateCredentials(logger, runtimeCredentialEnv);
   if (!credResult.ok) {
     return credResult;
   }
@@ -242,3 +284,4 @@ export async function runPreflightChecks(
   logger.info('All preflight checks passed');
   return ok(undefined);
 }
+

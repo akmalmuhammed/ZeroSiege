@@ -7,6 +7,7 @@ interface PipelineInput {
   analysisMode: "url-first";
   discoveryProfile?: "aggressive-broad";
   manualSource?: string;
+  credentialRef?: string;
   repoPath?: string;
   configPath?: string;
   outputPath?: string;

@@ -56,6 +56,7 @@ export interface AgentExecutionInput {
   harvestSummary?: string;
   configPath?: string | undefined;
   pipelineTestingMode?: boolean | undefined;
+  runtimeCredentialEnv?: Record<string, string>;
   attemptNumber: number;
 }
 
@@ -107,6 +108,7 @@ export class AgentExecutionService {
       harvestSummary,
       configPath,
       pipelineTestingMode = false,
+      runtimeCredentialEnv,
       attemptNumber,
     } = input;
 
@@ -174,7 +176,8 @@ export class AgentExecutionService {
       agentName, // description
       agentName,
       auditSession,
-      logger
+      logger,
+      runtimeCredentialEnv
     );
 
     // 6. Spending cap check - defense-in-depth

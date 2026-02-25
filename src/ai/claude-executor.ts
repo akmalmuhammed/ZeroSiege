@@ -202,7 +202,8 @@ export async function runClaudePrompt(
   description: string = 'Claude analysis',
   agentName: string | null = null,
   auditSession: AuditSession | null = null,
-  logger: ActivityLogger
+  logger: ActivityLogger,
+  runtimeCredentialEnv: Record<string, string> = {}
 ): Promise<ClaudePromptResult> {
   // 1. Initialize timing and prompt
   const timer = new Timer(`agent-${description.toLowerCase().replace(/\s+/g, '-')}`);
@@ -236,6 +237,20 @@ export async function runClaudePrompt(
   }
   if (process.env.ANTHROPIC_AUTH_TOKEN) {
     sdkEnv.ANTHROPIC_AUTH_TOKEN = process.env.ANTHROPIC_AUTH_TOKEN;
+  }
+  const allowedRuntimeKeys = [
+    'ANTHROPIC_API_KEY',
+    'CLAUDE_CODE_OAUTH_TOKEN',
+    'ANTHROPIC_BASE_URL',
+    'ANTHROPIC_AUTH_TOKEN',
+    'ROUTER_DEFAULT',
+    'CLAUDE_CODE_MAX_OUTPUT_TOKENS',
+  ] as const;
+  for (const key of allowedRuntimeKeys) {
+    const runtimeValue = runtimeCredentialEnv[key];
+    if (typeof runtimeValue === 'string' && runtimeValue.trim().length > 0) {
+      sdkEnv[key] = runtimeValue.trim();
+    }
   }
 
   // 5. Configure SDK options

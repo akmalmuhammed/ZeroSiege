@@ -6,13 +6,13 @@
 
 /**
  * Workflow error formatting utilities.
- * Pure functions with no side effects — safe for Temporal workflow sandbox.
+ * Pure functions with no side effects - safe for Temporal workflow sandbox.
  */
 
 /** Maps Temporal error type strings to actionable remediation hints. */
 const REMEDIATION_HINTS: Record<string, string> = {
   AuthenticationError:
-    'Verify ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN in .env is valid and not expired.',
+    'Verify ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN in run settings or environment is valid and not expired.',
   ConfigurationError: 'Check your CONFIG file path and contents.',
   BillingError:
     'Check your Anthropic billing dashboard. Add credits or wait for spending cap reset.',
@@ -24,7 +24,7 @@ const REMEDIATION_HINTS: Record<string, string> = {
 
 /**
  * Walk the .cause chain to find the innermost error with a .type property.
- * Temporal wraps ApplicationFailure in ActivityFailure — the useful info is inside.
+ * Temporal wraps ApplicationFailure in ActivityFailure - the useful info is inside.
  *
  * Uses duck-typing because workflow code cannot import @temporalio/activity types.
  */

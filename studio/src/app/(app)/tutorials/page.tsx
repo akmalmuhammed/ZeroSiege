@@ -4,7 +4,7 @@ const TUTORIALS = [
   {
     title: "Environment Setup",
     steps: [
-      "Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN in root .env.",
+      "Set ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN in root .env, or provide a run-only key in Launch Scan.",
       "Confirm Docker, Temporal, worker, and Studio containers are healthy.",
       "Ensure targets/ volume is mounted so harvested URL workspaces persist.",
     ],
@@ -22,6 +22,7 @@ const TUTORIALS = [
     title: "Launch URL-first Runs",
     steps: [
       "Use Launch Scan and provide target URL.",
+      "Choose AI Credential Source and optionally paste a run-only key/token.",
       "Optionally supply manual source as git URL or local repo name.",
       "Use a brand-new workspace each run (resume is intentionally disabled).",
     ],

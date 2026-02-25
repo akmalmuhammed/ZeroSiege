@@ -11,10 +11,11 @@ It adds:
 - Live pipeline status polling via Temporal
 - Workspace history, report browsing, and log tailing
 - Guided tutorials for each core feature
+- Optional run-only AI credentials entered directly in Launch Scan
 
 ## Run Locally
 
-1. Fill root `.env` with Anthropic credentials.
+1. Fill root `.env` with Anthropic credentials (or provide run-only credentials in the UI).
 2. Set Studio credentials in `.env`:
 
 ```bash
